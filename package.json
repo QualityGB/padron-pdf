@@ -1,6 +1,6 @@
 {
   "name": "@qualitygb/padron-pdf",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Generador de padrones electorales en PDF (datos + foto del ciudadano), plug-and-play. Lectura por lotes (keyset), PDFKit en streaming, storage configurable (local / S3 / Bunny / Railway), diseño por defecto y marca del partido.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -20,8 +20,9 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "ejemplo": "node --import tsx ejemplo/generar.ts",
-    "prepare": "tsup"
+    "ejemplo": "node --import tsx ejemplo/partido.ts",
+    "prepare": "tsup",
+    "ejemplo:partido": "node --import tsx ejemplo/partido.ts"
   },
   "dependencies": {
     "pdfkit": "^0.15.0",
