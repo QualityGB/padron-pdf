@@ -72,3 +72,60 @@ export function fuenteFotosConCache(opciones: OpcionesFotoCache) {
     finally { enVuelo.delete(cedula); }
   };
 }
+
+// === Flujo PRESIGN (recomendado para padrones a escala) ===
+// La API de fotos de la JCE da URLs firmadas por lote y las imágenes se bajan
+// DIRECTO del object storage (Tigris) → egress gratis, sin cargar la API.
+// (`GET /photos/:cedula` es solo para consultas humanas sueltas.)
+
+export interface OpcionesPresign {
+  /** Base de la API de fotos. Default: https://photo-jce-api-production.up.railway.app */
+  base?: string;
+  /** Token permanente de la API de fotos (header x-api-token). */
+  token: string;
+  /** TTL de las URLs firmadas en segundos (10–900). Default 900. */
+  expiresIn?: number;
+}
+
+/** Pide URLs firmadas para un lote de cédulas (≤500 por request). Map<cedula, url|null>. */
+export async function presignFotos(cedulas: string[], opciones: OpcionesPresign): Promise<Map<string, string | null>> {
+  const base = opciones.base ?? "https://photo-jce-api-production.up.railway.app";
+  const expiresIn = opciones.expiresIn ?? 900;
+  const urls = new Map<string, string | null>();
+  const limpias = [...new Set(cedulas.map(String).filter((c) => /^\d{11}$/.test(c)))];
+  for (let i = 0; i < limpias.length; i += 500) {
+    const lote = limpias.slice(i, i + 500);
+    let intento = 0;
+    for (;;) {
+      try {
+        const r = await fetch(`${base}/photos/presign`, {
+          method: "POST",
+          headers: { "x-api-token": opciones.token, "Content-Type": "application/json" },
+          body: JSON.stringify({ cedulas: lote, expiresIn }),
+        });
+        if (r.ok) {
+          const data = await r.json() as { items?: { cedula: string; found: boolean; url: string | null }[] };
+          for (const it of data.items ?? []) urls.set(it.cedula, it.found ? it.url : null);
+          break;
+        }
+      } catch { /* red: reintentar */ }
+      if (++intento >= 3) { for (const c of lote) if (!urls.has(c)) urls.set(c, null); break; }
+      await new Promise((s) => setTimeout(s, 200 * intento));
+    }
+  }
+  return urls;
+}
+
+/** Descarga una imagen DIRECTO de la URL firmada (egress gratis). Buffer o null. */
+export async function descargarFotoUrl(url: string | null, intentos = 3): Promise<Buffer | null> {
+  if (!url) return null;
+  for (let i = 0; i < intentos; i++) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) return Buffer.from(await r.arrayBuffer());
+      if (r.status === 404 || r.status === 403) return null;
+    } catch { /* red: reintentar */ }
+    if (i < intentos - 1) await new Promise((s) => setTimeout(s, 150 * (i + 1)));
+  }
+  return null;
+}

@@ -18,44 +18,81 @@ backend (Node).
 npm install git+https://github.com/QualityGB/padron-pdf.git
 ```
 
-## Uso
+## Dos fuentes de datos (junta **y** partido)
+
+La librería es **agnóstica de base de datos**: nunca se conecta a una BD; solo
+consume el async iterable `fuenteDatos` que le pasás. Por eso sirve para **las
+dos opciones**:
+
+- **Base de la JCE** (datos de la junta) → la API JCE arma `fuenteDatos` desde su
+  BD nacional y genera el padrón completo, en su propio servidor (cerca de la BD).
+- **Base del software del partido** (sus miembros) → el partido arma `fuenteDatos`
+  desde **su** BD y genera el padrón de sus miembros, en su propio servidor.
+
+Mismo diseño, misma librería; cambia solo de dónde salen los electores.
+
+## Uso — diseño oficial (`generarPadronOficial`)
 
 ```ts
 import {
-  generarPadron, almacenamientoS3, almacenamientoLocal, fuenteFotosConCache
+  generarPadronOficial, almacenamientoS3, presignFotos, descargarFotoUrl,
+  type ElectorPadron,
 } from "@qualitygb/padron-pdf";
 
-// 1) De dónde salen los ciudadanos (por lotes, sin cargar todo en memoria).
-//    En la junta: un paginador keyset de la BD. En el partido: su propia base.
-async function* fuenteDatos() {
-  let desde = "";
-  while (true) {
-    const lote = await traerLote(desde);      // ej. WHERE cedula > $desde ORDER BY cedula LIMIT 5000
-    if (!lote.length) break;
-    for (const c of lote) yield c;             // { cedula, nombres, apellido1, recinto, colegio, ... }
-    desde = lote[lote.length - 1].cedula;
+// 1) Electores ya AGRUPADOS por recinto → colegio → cédula (cada quien los
+//    saca de SU base: la junta de la BD nacional, el partido de la suya).
+async function* fuenteDatos(): AsyncIterable<ElectorPadron> {
+  for await (const r of miBaseDeDatos()) {     // keyset, sin cargar todo en memoria
+    yield {
+      cedula: r.cedula, nombres: r.nombres, apellido1: r.ap1, apellido2: r.ap2,
+      sexo: r.sexo, sexoCode: r.sexoCode, fechanacimiento: r.nac,
+      colegio: r.colegio, colegioElectores: r.colegioTotal,
+      recintoNombre: r.recinto, recintoDireccion: r.direccion, recintoCodigo: r.codRecinto,
+      recintoMeta: { sector: r.sector, circ: r.circ, muni: r.muni, prov: r.prov,
+                     ciudad: r.ciudad, zona: r.zona, colegios: r.nColegios, electores: r.nElectores },
+    };
   }
 }
 
-// 2) Fotos con caché (se descargan una vez).
-const fuenteFotos = fuenteFotosConCache({
-  dirCache: "/datos/cache-fotos",
-  obtener: async (cedula) => {
-    const r = await fetch(`${API}/foto/${cedula}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
-    return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
-  },
-});
+// 2) Fotos: presign por lote + descarga directa de Tigris (egress gratis).
+const map = new Map<string, Buffer>();
+const fuenteFotos = (cedula: string) => map.get(cedula) ?? null;  // prefetch por lote antes de generar
 
 // 3) Generar.
-const res = await generarPadron({
+const res = await generarPadronOficial({
+  meta: {
+    scope: ["Distrito Nacional", "Distrito Nacional", "Club de Leones El Millón"],
+    level: "Recinto", code: "PADRON-20260101-0001",
+    date: "01/01/2026", time: "09:00",
+    counts: { electores: 603, recintos: 1, colegios: 1 },
+    // El partido pone su propia fuente/sello:
+    fuente: "Software del Partido XYZ — miembros",
+    fuenteCorta: "Generado por Partido XYZ",
+    marca: { texto: "PARTIDO XYZ — USO INTERNO", logo: logoBuffer, opacidad: 0.07 },
+  },
   fuenteDatos: fuenteDatos(),
   fuenteFotos,
   storage: almacenamientoS3({ endpoint, bucket, accessKeyId, secretAccessKey, prefijo: "padrones/" }),
-  nombreArchivo: "padron-santiago.pdf",
-  plantilla: { titulo: "Padrón electoral", subtitulo: "Provincia: Santiago", pie: "Partido XYZ" },
-  marca: { texto: "PARTIDO XYZ — USO INTERNO", logo: logoBuffer, opacidad: 0.07 },
+  nombreArchivo: "padron-club-leones.pdf",
 });
 // → { url, total, paginas }
+```
+
+> El diseño oficial trae portada, una sección por **recinto** (con su meta-grid),
+> sub-grupos por **colegio**, tarjetas con foto + sello y un **checkbox** por
+> persona para marcar a lápiz. Si solo querés una lista plana simple, usá
+> `generarPadron({ fuenteDatos, fuenteFotos, storage, nombreArchivo, plantilla })`.
+
+### Fotos por presign (recomendado a escala)
+
+```ts
+import { presignFotos, descargarFotoUrl } from "@qualitygb/padron-pdf";
+// por cada lote de ≤500 cédulas, ANTES de generar:
+const urls = await presignFotos(cedulas, { token: PHOTO_API_TOKEN });   // Map<cedula, url>
+await Promise.all([...urls].map(async ([ced, url]) => {
+  const buf = await descargarFotoUrl(url);     // GET directo a Tigris (egress gratis)
+  if (buf) map.set(ced, buf);
+}));
 ```
 
 ## Storage
