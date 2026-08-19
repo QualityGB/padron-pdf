@@ -47,6 +47,8 @@ export interface ElectorPadron {
   /** Código del sexo para colorear ("M" / "F"). */
   sexoCode?: string | null;
   fechanacimiento?: string | null;
+  /** Teléfono de contacto (se muestra en la tarjeta si viene). */
+  telefono?: string | null;
   /** Código del colegio/mesa (se muestra en la tarjeta y agrupa). */
   colegio?: string | null;
   /** Nº de electores del colegio (para el pill del colegio). */
@@ -151,7 +153,14 @@ export async function generarPadronOficial(
 
   const runHead = (): number => {
     const yy = M;
-    tricolor(M, yy, 24);
+    if (meta.marca?.logo) {
+      // Con logo del partido, la cabecera de cada página lo lleva: si solo la
+      // portada firma, las páginas interiores parecen de otro documento.
+      try { doc.image(meta.marca.logo, M, yy - 3, { fit: [26, 26] }); }
+      catch { tricolor(M, yy, 24); }
+    } else {
+      tricolor(M, yy, 24);
+    }
     doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(10.5)
       .text(`${up(tituloDoc)} · ${up(siglas)}`, M + 32, yy - 1, { lineBreak: false });
     doc.fillColor(MUTED).font("Helvetica").fontSize(8)
@@ -296,6 +305,10 @@ export async function generarPadronOficial(
     doc.fillColor(STRONG).font("Helvetica-Bold").fontSize(9.5);
     doc.text(trunc(up(`${v.nombres ?? ""} ${v.apellido1 ?? ""} ${v.apellido2 ?? ""}`).replace(/\s+/g, " ").trim(), tw), tx, rowY + 18, { lineBreak: false });
     doc.fillColor(NAVY800).font("Courier-Bold").fontSize(9.5).text(v.cedula, tx, rowY + 31, { lineBreak: false });
+    if (v.telefono) {
+      doc.fillColor(MUTED).font("Courier").fontSize(8.5)
+        .text(trunc(v.telefono, tw - 100), tx, rowY + 32, { width: tw, align: "right", lineBreak: false });
+    }
     doc.fillColor(MUTED).font("Helvetica").fontSize(8);
     doc.text(trunc(`Nac. ${v.fechanacimiento || "—"} · Colegio ${v.colegio || "—"}`, tw), tx, rowY + 43, { lineBreak: false });
 
