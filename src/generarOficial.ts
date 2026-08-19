@@ -71,6 +71,16 @@ export interface MetaPadron {
   counts: { electores: number; recintos: number; colegios: number };
   /** Marca/sello del partido (opcional). */
   marca?: MarcaPartido;
+  /**
+   * Identidad del documento. Por defecto es el diseño JCE de siempre; un
+   * partido puede poner aquí su nombre, siglas, título y logo sin que el
+   * consumidor original cambie en nada (campos aditivos, contrato intacto).
+   */
+  institucion?: string;      // default "JUNTA CENTRAL ELECTORAL"
+  subInstitucion?: string;   // default "República Dominicana"
+  siglas?: string;           // default "JCE" (sello de portada y de tarjeta)
+  siglasSecundarias?: string;// default "PDN" (esquina superior derecha)
+  tituloDoc?: string;        // default "PADRÓN ELECTORAL"
   /** Fuente larga para la portada. Default: "API JCE — base de datos nacional". */
   fuente?: string;
   /** Fuente corta para el pie. Default: "Generado vía API JCE". */
@@ -122,6 +132,12 @@ export async function generarPadronOficial(
     [-6, -2, 2, 6].forEach((dx) => doc.rect(cx + dx - 0.7, cy - 2, 1.6, 8).fill());
     doc.restore();
   };
+  const institucion = meta.institucion ?? "JUNTA CENTRAL ELECTORAL";
+  const subInstitucion = meta.subInstitucion ?? "República Dominicana";
+  const siglas = meta.siglas ?? "JCE";
+  const siglasSec = meta.siglasSecundarias ?? "PDN";
+  const tituloDoc = meta.tituloDoc ?? "PADRÓN ELECTORAL";
+
   const marcaFondo = () => {
     const m = meta.marca;
     if (!m?.texto) return;
@@ -137,7 +153,7 @@ export async function generarPadronOficial(
     const yy = M;
     tricolor(M, yy, 24);
     doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(10.5)
-      .text("PADRÓN ELECTORAL · JCE", M + 32, yy - 1, { lineBreak: false });
+      .text(`${up(tituloDoc)} · ${up(siglas)}`, M + 32, yy - 1, { lineBreak: false });
     doc.fillColor(MUTED).font("Helvetica").fontSize(8)
       .text(scopeTxt, M + 32, yy + 12, { width: CONTENT_W - 160, lineBreak: false, ellipsis: true });
     doc.fillColor(NAVY800).font("Courier-Bold").fontSize(8.5)
@@ -158,18 +174,24 @@ export async function generarPadronOficial(
   doc.addPage(); marcaFondo();
   {
     const cx = M + 28, cy = M + 26;
-    doc.save().circle(cx, cy, 26).lineWidth(2).strokeColor(NAVY800).stroke();
-    doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(13).text("JCE", cx - 26, cy - 7, { width: 52, align: "center" });
-    doc.restore();
-    doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(13).text("JUNTA CENTRAL ELECTORAL", M + 70, M + 12, { width: CONTENT_W - 140, align: "center" });
-    doc.fillColor(MUTED).font("Helvetica").fontSize(10.5).text("República Dominicana", M + 70, M + 30, { width: CONTENT_W - 140, align: "center" });
+    if (meta.marca?.logo) {
+      // El logo del partido ocupa el lugar del sello circular.
+      try { doc.image(meta.marca.logo, cx - 26, cy - 26, { fit: [52, 52], align: "center", valign: "center" }); }
+      catch { /* un logo corrupto no tumba el documento */ }
+    } else {
+      doc.save().circle(cx, cy, 26).lineWidth(2).strokeColor(NAVY800).stroke();
+      doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(13).text(up(siglas), cx - 26, cy - 7, { width: 52, align: "center" });
+      doc.restore();
+    }
+    doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(13).text(up(institucion), M + 70, M + 12, { width: CONTENT_W - 140, align: "center" });
+    doc.fillColor(MUTED).font("Helvetica").fontSize(10.5).text(subInstitucion, M + 70, M + 30, { width: CONTENT_W - 140, align: "center" });
     tricolor(PAGE_W - M - 34, M + 6, 34);
-    doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(9).text("PDN", PAGE_W - M - 40, M + 36, { width: 40, align: "center" });
+    doc.fillColor(NAVY800).font("Helvetica-Bold").fontSize(9).text(up(siglasSec), PAGE_W - M - 40, M + 36, { width: 40, align: "center" });
     doc.moveTo(M, M + 58).lineTo(PAGE_W - M, M + 58).lineWidth(2).strokeColor(NAVY800).stroke();
     doc.moveTo(M, M + 62).lineTo(PAGE_W - M, M + 62).lineWidth(0.8).strokeColor(NAVY800).stroke();
 
     let ty = M + 120;
-    doc.fillColor(RED600).font("Helvetica-Bold").fontSize(13).text("P A D R Ó N   E L E C T O R A L", M, ty, { width: CONTENT_W, align: "center", characterSpacing: 1 });
+    doc.fillColor(RED600).font("Helvetica-Bold").fontSize(13).text(up(tituloDoc).split("").join(" "), M, ty, { width: CONTENT_W, align: "center", characterSpacing: 1 });
     ty += 26;
     doc.fillColor(NAVY900).font("Helvetica-Bold").fontSize(30).text(up(meta.scope[meta.scope.length - 1] || "República Dominicana"), M, ty, { width: CONTENT_W, align: "center" });
     ty = doc.y + 6;
@@ -261,7 +283,7 @@ export async function generarPadronOficial(
       doc.fillColor(FAINT).font("Helvetica").fontSize(7).text("s/foto", fx, fy2 + FOTO / 2 - 4, { width: FOTO, align: "center" });
     }
     doc.roundedRect(fx, fy2 + FOTO - 9, FOTO, 9, 0).fill("#FFFFFF");
-    doc.fillColor(FAINT).font("Helvetica-Bold").fontSize(6.5).text("JCE", fx, fy2 + FOTO - 8, { width: FOTO, align: "center", lineBreak: false });
+    doc.fillColor(FAINT).font("Helvetica-Bold").fontSize(6.5).text(up(siglas), fx, fy2 + FOTO - 8, { width: FOTO, align: "center", lineBreak: false });
     // checkbox para marcar a lápiz
     const CHK = 14, RESERVA = CHK + 10;
     const cbx = x + CARD_W - RESERVA + 2, cby = rowY + (CARD_H - CHK) / 2;
